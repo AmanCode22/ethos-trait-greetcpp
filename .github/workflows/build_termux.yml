@@ -1,0 +1,81 @@
+name: Build for Termux
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            ndk_abi: arm64-v8a
+            asset_suffix: arm64
+            needs_qemu: false
+          - arch: armv7
+            ndk_abi: armeabi-v7a
+            asset_suffix: armv7
+            needs_qemu: true
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup QEMU for ARMv7
+        if: matrix.needs_qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.ndk_abi }} \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=Release
+        
+      - name: Build
+        run: cmake --build build --config Release -j$(nproc)
+        
+      - name: Get trait name
+        id: config
+        run: echo "trait_name=$(jq -r '.name' manifest.json)" >> $GITHUB_OUTPUT
+        
+      - name: Upload to GitHub Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: build/lib${{ steps.config.outputs.trait_name }}.so
+          asset_name: ${{ steps.config.outputs.trait_name }}-termux-${{ matrix.asset_suffix }}.so
+          tag: ${{ github.event.inputs.tag_name }}
+          overwrite: true
+  trigger-pr-creation:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      actions: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Trigger pr manifest creatopm workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run "Create PR manifest" \
+            --ref ${{ github.ref_name }} \
+            -f tag_name="${{ github.event.inputs.tag_name }}" \
+            --repo ${{ github.repository }}
