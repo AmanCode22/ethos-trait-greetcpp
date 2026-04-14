@@ -1,4 +1,4 @@
-set(TRAIT_NAME "<YOUR TRAIT_NAME HERE>")
+set(TRAIT_NAME "greetcpp")
 
 cmake_minimum_required(VERSION 3.10)
 project(${TRAIT_NAME} LANGUAGES CXX)
